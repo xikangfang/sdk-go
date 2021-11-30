@@ -18,7 +18,7 @@ type Timer struct {
 	expirableMetrics *ExpirableMetrics
 	queue            chan float64
 	reservoir        gm.Sample
-	httpCli          *HttpClient
+	httpCli          *Client
 	ticker           *time.Ticker
 	closed           int32
 }
@@ -35,7 +35,7 @@ func NewTimerWithFlushTime(name string, tags string, flushInterval time.Duration
 		lock:             &sync.Mutex{},
 		queue:            make(chan float64, maxQueueSize),
 		reservoir:        gm.NewUniformSample(reservoirSize),
-		httpCli:          NewHttpClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
+		httpCli:          GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
 		ticker:           time.NewTicker(flushInterval),
 		closed:           0,
 	}

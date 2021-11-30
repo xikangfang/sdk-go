@@ -5,8 +5,8 @@ import (
 )
 
 type Reporter struct {
-	param *ReporterBuilder
-	cli   *Client
+	param   *ReporterBuilder
+	manager *Manager
 }
 
 type ReporterBuilder struct {
@@ -47,8 +47,8 @@ func (b *ReporterBuilder) Build() *Reporter {
 		b.prefix = defaultMetricsPrefix
 	}
 	return &Reporter{
-		param: b,
-		cli:   GetClientByPrefix(b.prefix),
+		param:   b,
+		manager: GetManager(b.prefix),
 	}
 }
 
@@ -62,7 +62,7 @@ func (r *Reporter) Counter(key string, value float64, tagKvs ...string) {
 	if !r.param.enableMetrics {
 		return
 	}
-	r.cli.emitCounter(key, appendTags(r.param.baseTags, tagKvs), value)
+	r.manager.emitCounter(key, appendTags(r.param.baseTags, tagKvs), value)
 }
 
 /**
@@ -76,7 +76,7 @@ func (r *Reporter) Timer(key string, value float64, tagKvs ...string) {
 		return
 	}
 	//metric.emitTimer(key, cost, MetricsHelper.appendTags(BASE_TAGS, TagKvs)); //todo:补充baseTags
-	r.cli.emitTimer(key, appendTags(r.param.baseTags, tagKvs), value)
+	r.manager.emitTimer(key, appendTags(r.param.baseTags, tagKvs), value)
 }
 
 /**
@@ -90,7 +90,7 @@ func (r *Reporter) Latency(key string, begin time.Time, tagKvs ...string) {
 		return
 	}
 	//metric.emitTimer(key, cost, MetricsHelper.appendTags(BASE_TAGS, TagKvs)); //todo:补充baseTags
-	r.cli.emitTimer(key, appendTags(r.param.baseTags, tagKvs), float64(time.Now().Sub(begin).Milliseconds()))
+	r.manager.emitTimer(key, appendTags(r.param.baseTags, tagKvs), float64(time.Now().Sub(begin).Milliseconds()))
 }
 
 /**
@@ -103,5 +103,5 @@ func (r *Reporter) Store(key string, value float64, tagKvs ...string) {
 	if !r.param.enableMetrics {
 		return
 	}
-	r.cli.emitStore(key, appendTags(r.param.baseTags, tagKvs), value)
+	r.manager.emitStore(key, appendTags(r.param.baseTags, tagKvs), value)
 }

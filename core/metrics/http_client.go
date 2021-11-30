@@ -4,15 +4,23 @@ import (
 	"encoding/json"
 	"github.com/byteplus-sdk/sdk-go/core/logs"
 	"github.com/valyala/fasthttp"
+	"sync"
 	"time"
 )
 
 const (
-	maxTryTimes = 2
+	maxTryTimes        = 2
 	defaultHttpTimeout = 800 * time.Millisecond
 )
 
-var httpCli = &fasthttp.Client{}
+var (
+	httpCli     = &fasthttp.Client{}
+	clientCache = &InstanceCache{
+		instanceMap:     make(map[string]interface{}),
+		instanceBuilder: newClient,
+		lock:            &sync.Mutex{},
+	}
+)
 
 type MetricsRequest struct {
 	MetricsName string            `json:"metric"`
@@ -21,20 +29,24 @@ type MetricsRequest struct {
 	TimeStamp   int64             `json:"timestamp"`
 }
 
-type HttpClient struct {
+type Client struct {
 	url     string
 	timeout time.Duration
 }
 
-func NewHttpClient(url string) *HttpClient {
-	return &HttpClient{
+func GetClient(url string) *Client {
+	return clientCache.GetInstanceByName(url).(*Client)
+}
+
+func newClient(url string) interface{} {
+	return &Client{
 		url:     url,
 		timeout: defaultHttpTimeout,
 	}
 }
 
 // send httpRequest to metrics server
-func (h *HttpClient) send(request *fasthttp.Request) bool {
+func (h *Client) send(request *fasthttp.Request) bool {
 	defer func() {
 		fasthttp.ReleaseRequest(request)
 	}()
@@ -49,27 +61,27 @@ func (h *HttpClient) send(request *fasthttp.Request) bool {
 		}
 		if err == nil && response.StatusCode() == fasthttp.StatusOK {
 			if IsEnablePrintLog() {
-				logs.Debug("success reporting metrics request:%+v", request)
+				logs.Debug("success reporting metrics request:\n%+v", request)
 			}
 			fasthttp.ReleaseResponse(response)
 			return true
 		}
 	}
-	logs.Error("do http request occur error:%+v, request:%+v, response:%+v, url:%s",
+	logs.Error("do http request occur error:%+v, request:\n%+v, response:\n%+v, url:%s",
 		err, request.String(), response, h.url)
 	fasthttp.ReleaseResponse(response)
 	return false
 }
 
-func (h *HttpClient) emit(metricRequest []*MetricsRequest) bool {
+func (h *Client) emit(metricRequest []*MetricsRequest) bool {
 	request, err := h.buildMetricsRequest(metricRequest)
 	if err != nil {
-		logs.Error("[Metrics-SDk] build metrics error:%s", err.Error())
+		logs.Error("build metrics error:%s", err.Error())
 	}
 	return h.send(request)
 }
 
-func (h *HttpClient) buildMetricsRequest(metricRequests []*MetricsRequest) (*fasthttp.Request, error) {
+func (h *Client) buildMetricsRequest(metricRequests []*MetricsRequest) (*fasthttp.Request, error) {
 	request := fasthttp.AcquireRequest()
 	request.Header.SetMethod(fasthttp.MethodPost)
 	request.SetRequestURI(h.url)

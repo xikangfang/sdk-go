@@ -18,7 +18,7 @@ type Counter struct {
 	expirableMetrics *ExpirableMetrics
 	queue            chan *Item
 	valueMap         map[Item]*MetricsRequest
-	httpCli          *HttpClient
+	httpCli          *Client
 	ticker           *time.Ticker
 	stopped          int32
 }
@@ -34,7 +34,7 @@ func NewCounterWithFlushTime(name string, flushInterval time.Duration) *Counter 
 		lock:             &sync.Mutex{},
 		queue:            make(chan *Item, maxQueueSize),
 		valueMap:         make(map[Item]*MetricsRequest),
-		httpCli:          NewHttpClient(fmt.Sprintf(counterUrlFormat, metricsDomain)),
+		httpCli:          GetClient(fmt.Sprintf(counterUrlFormat, metricsDomain)),
 		ticker:           time.NewTicker(flushInterval),
 		stopped:          0,
 	}

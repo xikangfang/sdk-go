@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-var (
-	cliLocker      = &sync.Mutex{}
-	clientCache    = make(map[string]*Client)
-)
-
 const (
 	//default expire interval of each counter/timer/store, expired metrics will be cleaned
 	defaultTTL = 100 * time.Second
@@ -19,7 +14,13 @@ const (
 	defaultFlushInterval = 15 * time.Second
 )
 
-type Client struct {
+var managerCache = &InstanceCache{
+	instanceMap:     make(map[string]interface{}),
+	instanceBuilder: newManager,
+	lock:            &sync.Mutex{},
+}
+
+type Manager struct {
 	prefix         string
 	ttl            time.Duration
 	locker         *sync.Mutex
@@ -31,25 +32,17 @@ type Client struct {
 	stopped        int32
 }
 
-// GetClientByPrefix return instance of client according metrics prefix
-func GetClientByPrefix(prefix string) *Client {
-	cliLocker.Lock()
-	defer cliLocker.Unlock()
-	if cli, ok := clientCache[prefix]; ok {
-		return cli
-	}
-	cli := newClientWithParams(prefix, defaultTTL, defaultFlushInterval)
-	clientCache[prefix] = cli
-	cli.start()
-	return cli
+// GetManager return instance of client according metrics prefix
+func GetManager(prefix string) *Manager {
+	return managerCache.GetInstanceByName(prefix).(*Manager)
 }
 
-func newClient() *Client {
-	return newClientWithParams(defaultMetricsPrefix, defaultTTL, defaultFlushInterval)
+func newManager(prefix string) interface{} {
+	return newManagerWithParams(prefix, defaultTTL, defaultFlushInterval)
 }
 
-func newClientWithParams(prefix string, ttl time.Duration, flushInterval time.Duration) *Client {
-	return &Client{
+func newManagerWithParams(prefix string, ttl time.Duration, flushInterval time.Duration) *Manager {
+	return &Manager{
 		prefix:         prefix,
 		ttl:            ttl,
 		locker:         &sync.Mutex{},
@@ -58,11 +51,11 @@ func newClientWithParams(prefix string, ttl time.Duration, flushInterval time.Du
 		counterMetrics: make(map[string]*Counter, 256),
 		timerMetrics:   make(map[string]*Timer, 256),
 		ticker:         time.NewTicker(ttl),
-		stopped:        -1,
+		stopped:        0,
 	}
 }
 
-func (c *Client) start() {
+func (c *Manager) start() {
 	atomic.StoreInt32(&c.stopped, 0)
 	go func() {
 		for {
@@ -75,15 +68,15 @@ func (c *Client) start() {
 	}()
 }
 
-func (c *Client) isStopped() bool {
+func (c *Manager) isStopped() bool {
 	return atomic.LoadInt32(&c.stopped) == 1
 }
 
-func (c *Client) Stop() {
+func (c *Manager) Stop() {
 	atomic.StoreInt32(&c.stopped, 1)
 }
 
-func (c *Client) tidy() {
+func (c *Manager) tidy() {
 	// clean expired store
 	expiredStores := make([]*Store, 0)
 	for _, store := range c.storeMetrics {
@@ -142,19 +135,19 @@ func (c *Client) tidy() {
 	}
 }
 
-func (c *Client) emitCounter(name string, tags map[string]string, value float64) {
+func (c *Manager) emitCounter(name string, tags map[string]string, value float64) {
 	c.getOrAddTsCounter(c.prefix+"."+name).emit(tags, value)
 }
 
-func (c *Client) emitTimer(name string, tags map[string]string, value float64) {
+func (c *Manager) emitTimer(name string, tags map[string]string, value float64) {
 	c.getOrAddTsTimer(c.prefix+"."+name, tags).emit(value)
 }
 
-func (c *Client) emitStore(name string, tags map[string]string, value float64) {
+func (c *Manager) emitStore(name string, tags map[string]string, value float64) {
 	c.getOrAddTsStore(c.prefix+"."+name).emit(tags, value)
 }
 
-func (c *Client) getOrAddTsStore(name string) *Store {
+func (c *Manager) getOrAddTsStore(name string) *Store {
 	store, exist := c.storeMetrics[name]
 	if !exist {
 		c.locker.Lock()
@@ -171,7 +164,7 @@ func (c *Client) getOrAddTsStore(name string) *Store {
 	return store
 }
 
-func (c *Client) getOrAddTsCounter(name string) *Counter {
+func (c *Manager) getOrAddTsCounter(name string) *Counter {
 	counter, exist := c.counterMetrics[name]
 	if !exist {
 		c.locker.Lock()
@@ -188,7 +181,7 @@ func (c *Client) getOrAddTsCounter(name string) *Counter {
 	return counter
 }
 
-func (c *Client) getOrAddTsTimer(name string, tagKvs map[string]string) *Timer {
+func (c *Manager) getOrAddTsTimer(name string, tagKvs map[string]string) *Timer {
 	tags := processTags(tagKvs)
 	nameWithTag := name + tags
 	timer, exist := c.timerMetrics[nameWithTag]

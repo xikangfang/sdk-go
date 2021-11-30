@@ -14,7 +14,7 @@ type Store struct {
 	expirableMetrics *ExpirableMetrics
 	queue            chan *Item
 	valueMap         map[Item]*MetricsRequest
-	httpCli          *HttpClient
+	httpCli          *Client
 	ticker           *time.Ticker
 	closed           int32
 }
@@ -30,7 +30,7 @@ func NewStoreWithFlushTime(name string, flushInterval time.Duration) *Store {
 		lock:             &sync.Mutex{},
 		queue:            make(chan *Item, maxQueueSize),
 		valueMap:         make(map[Item]*MetricsRequest),
-		httpCli:          NewHttpClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
+		httpCli:          GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
 		ticker:           time.NewTicker(flushInterval),
 		closed:           0,
 	}

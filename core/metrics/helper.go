@@ -4,6 +4,7 @@ import (
 	"net"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // transfer TagKvs map to string in fixed order
@@ -68,6 +69,26 @@ func StringMapClone(src map[string]string) map[string]string {
 		dest[k] =v
 	}
 	return dest
+}
+
+type InstanceCache struct {
+	instanceMap     map[string]interface{}
+	instanceBuilder func(name string) interface{}
+	lock            *sync.Mutex
+}
+
+func (c *InstanceCache) GetInstanceByName(name string) interface{} {
+	if cli, ok := c.instanceMap[name]; ok {
+		return cli
+	}
+	c.lock.Lock()
+	defer c.lock.Unlock()
+	if cli, ok := c.instanceMap[name]; ok {
+		return cli
+	}
+	client := c.instanceBuilder(name)
+	c.instanceMap[name] = client
+	return client
 }
 
 
