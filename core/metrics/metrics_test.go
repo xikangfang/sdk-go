@@ -9,7 +9,7 @@ import (
 )
 
 func metricsInit() {
-	SetPrintLog(true)
+	SetPrintLog(false)
 	logs.Level = logs.LevelDebug
 }
 

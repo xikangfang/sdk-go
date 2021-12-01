@@ -80,7 +80,7 @@ func (c *Store) flush() {
 			}
 		}
 		if success := c.httpCli.emit(metricsRequests); !success {
-			logs.Error("exec counter fail")
+			logs.Error("exec store fail")
 		}
 	}
 }

@@ -45,40 +45,47 @@ func newClient(url string) interface{} {
 	}
 }
 
-// send httpRequest to metrics server
-func (h *Client) send(request *fasthttp.Request) bool {
-	defer func() {
-		fasthttp.ReleaseRequest(request)
-	}()
-	var err error
-	var response *fasthttp.Response
+// send send httpRequest to metrics server
+func (h *Client) send(metricRequests []*MetricsRequest) bool {
 	for i := 0; i < maxTryTimes; i++ {
-		response = fasthttp.AcquireResponse()
-		if h.timeout > 0 {
-			err = httpCli.DoTimeout(request, response, h.timeout)
-		} else {
-			err = httpCli.Do(request, response)
+		request, err := h.buildMetricsRequest(metricRequests)
+		if err != nil {
+			fasthttp.ReleaseRequest(request)
+			continue
 		}
-		if err == nil && response.StatusCode() == fasthttp.StatusOK {
-			if IsEnablePrintLog() {
-				logs.Debug("success reporting metrics request:\n%+v", request)
-			}
-			fasthttp.ReleaseResponse(response)
+		if h.doSend(request) {
 			return true
 		}
 	}
-	logs.Error("do http request occur error:%+v, request:\n%+v, response:\n%+v, url:%s",
-		err, request.String(), response, h.url)
-	fasthttp.ReleaseResponse(response)
 	return false
 }
 
 func (h *Client) emit(metricRequest []*MetricsRequest) bool {
-	request, err := h.buildMetricsRequest(metricRequest)
-	if err != nil {
-		logs.Error("build metrics error:%s", err.Error())
+	return h.send(metricRequest)
+}
+
+func (h *Client) doSend(request *fasthttp.Request) bool {
+	response := fasthttp.AcquireResponse()
+	defer func() {
+		fasthttp.ReleaseRequest(request)
+		fasthttp.ReleaseResponse(response)
+	}()
+	var err error
+	if h.timeout > 0 {
+		err = httpCli.DoTimeout(request, response, h.timeout)
+	} else {
+		err = httpCli.Do(request, response)
 	}
-	return h.send(request)
+	if err == nil && response.StatusCode() == fasthttp.StatusOK {
+		if IsEnablePrintLog() {
+			logs.Debug("success reporting metrics request:\n%+v", request)
+		}
+		return true
+	}
+	if IsEnablePrintLog() {
+		logs.Error("do http request occur error:%+v\n url:%s\n response:\n%+v", err, h.url, response)
+	}
+	return false
 }
 
 func (h *Client) buildMetricsRequest(metricRequests []*MetricsRequest) (*fasthttp.Request, error) {
