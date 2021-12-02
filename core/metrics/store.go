@@ -3,20 +3,15 @@ package metrics
 import (
 	"fmt"
 	"github.com/byteplus-sdk/sdk-go/core/logs"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
 type Store struct {
-	name             string
-	lock             *sync.Mutex
-	expirableMetrics *ExpirableMetrics
-	queue            chan *Item
-	valueMap         map[Item]*MetricsRequest
-	httpCli          *Client
-	ticker           *time.Ticker
-	closed           int32
+	name       string
+	expireTime time.Time
+	queue      chan *Item
+	valueMap   map[Item]*MetricsRequest
+	httpCli    *Client
 }
 
 func NewStore(name string) *Store {
@@ -25,19 +20,16 @@ func NewStore(name string) *Store {
 
 func NewStoreWithFlushTime(name string, flushInterval time.Duration) *Store {
 	c := &Store{
-		name:             name,
-		expirableMetrics: NewExpirableMetrics(),
-		lock:             &sync.Mutex{},
-		queue:            make(chan *Item, maxQueueSize),
-		valueMap:         make(map[Item]*MetricsRequest),
-		httpCli:          GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
-		ticker:           time.NewTicker(flushInterval),
-		closed:           0,
+		name:       name,
+		expireTime: time.Now().Add(defaultExpireTime),
+		queue:      make(chan *Item, maxQueueSize),
+		valueMap:   make(map[Item]*MetricsRequest),
+		httpCli:    GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
 	}
 	return c
 }
 
-func (c *Store) emit(tags map[string]string, value float64) {
+func (c *Store) emit(value float64, tags map[string]string) {
 	tag := processTags(tags)
 	item := NewItem(tag, value)
 	select {
@@ -47,6 +39,20 @@ func (c *Store) emit(tags map[string]string, value float64) {
 			logs.Warn("metrics emit too fast, exceed max queue size(%d)", maxQueueSize)
 		}
 	}
+}
+
+func (c *Store) isExpired() bool {
+	return time.Now().After(c.expireTime)
+}
+
+func (c *Store) updateExpireTime(ttl time.Duration) {
+	if ttl > 0 {
+		c.expireTime = time.Now().Add(ttl)
+	}
+}
+
+func (c *Store) getName() string {
+	return c.name
 }
 
 func (c *Store) flush() {
@@ -83,25 +89,4 @@ func (c *Store) flush() {
 			logs.Error("exec store fail")
 		}
 	}
-}
-
-func (c *Store) start() {
-	atomic.StoreInt32(&c.closed, 0)
-	go func() {
-		for {
-			if c.isClosed() {
-				return
-			}
-			<-c.ticker.C
-			c.flush()
-		}
-	}()
-}
-
-func (c *Store) isClosed() bool {
-	return atomic.LoadInt32(&c.closed) == 1
-}
-
-func (c *Store) close() {
-	atomic.StoreInt32(&c.closed, 1) //todo:是否需要关闭channel
 }

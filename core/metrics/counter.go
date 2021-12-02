@@ -3,8 +3,6 @@ package metrics
 import (
 	"fmt"
 	"github.com/byteplus-sdk/sdk-go/core/logs"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -13,14 +11,11 @@ const (
 )
 
 type Counter struct {
-	name             string
-	lock             *sync.Mutex
-	expirableMetrics *ExpirableMetrics
-	queue            chan *Item
-	valueMap         map[Item]*MetricsRequest
-	httpCli          *Client
-	ticker           *time.Ticker
-	stopped          int32
+	name       string
+	expireTime time.Time
+	queue      chan *Item
+	valueMap   map[Item]*MetricsRequest
+	httpCli    *Client
 }
 
 func NewCounter(name string) *Counter {
@@ -29,19 +24,26 @@ func NewCounter(name string) *Counter {
 
 func NewCounterWithFlushTime(name string, flushInterval time.Duration) *Counter {
 	c := &Counter{
-		name:             name,
-		expirableMetrics: NewExpirableMetrics(),
-		lock:             &sync.Mutex{},
-		queue:            make(chan *Item, maxQueueSize),
-		valueMap:         make(map[Item]*MetricsRequest),
-		httpCli:          GetClient(fmt.Sprintf(counterUrlFormat, metricsDomain)),
-		ticker:           time.NewTicker(flushInterval),
-		stopped:          0,
+		name:       name,
+		expireTime: time.Now().Add(defaultExpireTime),
+		queue:      make(chan *Item, maxQueueSize),
+		valueMap:   make(map[Item]*MetricsRequest),
+		httpCli:    GetClient(fmt.Sprintf(counterUrlFormat, metricsDomain)),
 	}
 	return c
 }
 
-func (c *Counter) emit(tags map[string]string, value float64) {
+func (c *Counter) isExpired() bool {
+	return time.Now().After(c.expireTime)
+}
+
+func (c *Counter) updateExpireTime(ttl time.Duration) {
+	if ttl > 0 {
+		c.expireTime = time.Now().Add(ttl)
+	}
+}
+
+func (c *Counter) emit(value float64, tags map[string]string) {
 	tag := processTags(tags)
 	item := NewItem(tag, value)
 	select {
@@ -51,6 +53,10 @@ func (c *Counter) emit(tags map[string]string, value float64) {
 			logs.Warn("metrics emit too fast, exceed max queue size(%d)", maxQueueSize)
 		}
 	}
+}
+
+func (c *Counter) getName() string {
+	return c.name
 }
 
 func (c *Counter) flush() {
@@ -87,25 +93,4 @@ func (c *Counter) flush() {
 			logs.Error("exec counter fail")
 		}
 	}
-}
-
-func (c *Counter) start() {
-	atomic.StoreInt32(&c.stopped, 0)
-	go func() {
-		for {
-			if c.isClosed() {
-				return
-			}
-			<-c.ticker.C
-			c.flush()
-		}
-	}()
-}
-
-func (c *Counter) isClosed() bool {
-	return atomic.LoadInt32(&c.stopped) == 1
-}
-
-func (c *Counter) stop() {
-	atomic.StoreInt32(&c.stopped, 1)
 }

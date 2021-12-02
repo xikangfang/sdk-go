@@ -4,23 +4,18 @@ import (
 	"fmt"
 	"github.com/byteplus-sdk/sdk-go/core/logs"
 	gm "github.com/rcrowley/go-metrics"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
 const reservoirSize = 65536
 
 type Timer struct {
-	name             string
-	tagKvs           map[string]string
-	lock             *sync.Mutex
-	expirableMetrics *ExpirableMetrics
-	queue            chan float64
-	reservoir        gm.Sample
-	httpCli          *Client
-	ticker           *time.Ticker
-	closed           int32
+	name       string
+	expireTime time.Time
+	tagKvs     map[string]string
+	queue      chan float64
+	reservoir  gm.Sample
+	httpCli    *Client
 }
 
 func NewTimer(name string) *Counter {
@@ -29,20 +24,31 @@ func NewTimer(name string) *Counter {
 
 func NewTimerWithFlushTime(name string, tags string, flushInterval time.Duration) *Timer {
 	c := &Timer{
-		name:             name,
-		tagKvs:           recoverTags(tags),
-		expirableMetrics: NewExpirableMetrics(),
-		lock:             &sync.Mutex{},
-		queue:            make(chan float64, maxQueueSize),
-		reservoir:        gm.NewUniformSample(reservoirSize),
-		httpCli:          GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
-		ticker:           time.NewTicker(flushInterval),
-		closed:           0,
+		name:       name,
+		tagKvs:     recoverTags(tags),
+		expireTime: time.Now().Add(defaultExpireTime),
+		queue:      make(chan float64, maxQueueSize),
+		reservoir:  gm.NewUniformSample(reservoirSize),
+		httpCli:    GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
 	}
 	return c
 }
 
-func (c *Timer) emit(value float64) {
+func (c *Timer) isExpired() bool {
+	return time.Now().After(c.expireTime)
+}
+
+func (c *Timer) updateExpireTime(ttl time.Duration) {
+	if ttl > 0 {
+		c.expireTime = time.Now().Add(ttl)
+	}
+}
+
+func (c *Timer) getName() string {
+	return c.name
+}
+
+func (c *Timer) emit(value float64, tags map[string]string) {
 	select {
 	case c.queue <- value:
 	default:
@@ -68,7 +74,6 @@ func (c *Timer) flush() {
 	if success := c.httpCli.emit(metricsRequests); !success {
 		logs.Error("exec timer fail")
 	}
-
 }
 
 func (c *Timer) buildMetricRequests(snapshot gm.Sample, size int64) []*MetricsRequest {
@@ -156,25 +161,4 @@ func (c *Timer) buildMetricRequests(snapshot gm.Sample, size int64) []*MetricsRe
 	metricsRequests = append(metricsRequests, pc999Request)
 
 	return metricsRequests
-}
-
-func (c *Timer) start() {
-	atomic.StoreInt32(&c.closed, 0)
-	go func() {
-		for {
-			if c.isClosed() {
-				return
-			}
-			<-c.ticker.C
-			c.flush()
-		}
-	}()
-}
-
-func (c *Timer) isClosed() bool {
-	return atomic.LoadInt32(&c.closed) == 1
-}
-
-func (c *Timer) close() {
-	atomic.StoreInt32(&c.closed, 1) //todo:是否需要关闭channel
 }

@@ -9,3 +9,11 @@ const (
 
 	maxFlashSize = 65536 * 2
 )
+
+type metricsType int
+
+const (
+	metricsTypeCounter metricsType = iota
+	metricsTypeTimer
+	metricsTypeStore
+)
