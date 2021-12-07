@@ -2,9 +2,7 @@ package metrics
 
 import "time"
 
-const defaultExpireTime = 12 * time.Hour
-
-type ExpirableMetrics interface {
+type Metrics interface {
 	getName() string
 	isExpired() bool
 	updateExpireTime(ttl time.Duration)

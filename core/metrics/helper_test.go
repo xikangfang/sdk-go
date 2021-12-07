@@ -19,7 +19,6 @@ func Test_processTags(t *testing.T) {
 			},
 			want: "",
 		},
-		// TODO: Add test cases.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -37,7 +36,6 @@ func Test_getLocalHost(t *testing.T) {
 	}{
 		{name: "ip",
 			want: "10.90.190.185"},
-		// TODO: Add test cases.
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

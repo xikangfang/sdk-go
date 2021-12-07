@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	// Prevent too fast reporting and excessive memory usage
 	maxQueueSize = maxFlashSize //todo:暂时跟一次flush的size保持一致，需要确认最合适的值
 )
 
@@ -25,7 +26,7 @@ func NewCounter(name string) *Counter {
 func NewCounterWithFlushTime(name string, flushInterval time.Duration) *Counter {
 	c := &Counter{
 		name:       name,
-		expireTime: time.Now().Add(defaultExpireTime),
+		expireTime: time.Now().Add(defaultMetricsExpireTime),
 		queue:      make(chan *Item, maxQueueSize),
 		valueMap:   make(map[Item]*MetricsRequest),
 		httpCli:    GetClient(fmt.Sprintf(counterUrlFormat, metricsDomain)),
@@ -89,8 +90,6 @@ func (c *Counter) flush() {
 				logs.Info("remove counter key: %+v", item)
 			}
 		}
-		if success := c.httpCli.emit(metricsRequests); !success {
-			logs.Error("exec counter fail")
-		}
+		c.httpCli.put(metricsRequests)
 	}
 }

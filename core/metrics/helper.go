@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"github.com/byteplus-sdk/sdk-go/core/logs"
 	"net"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -45,6 +47,18 @@ func appendTags(baseTags map[string]string, tagStrs []string) map[string]string 
 		tagKvs[res[0]] = res[1]
 	}
 	return tagKvs
+}
+
+// AsyncExecute go func with recover
+func AsyncExecute(runnable func()) {
+	go func(run func()) {
+		defer func() {
+			if r := recover(); r != nil {
+				logs.Error("async execute %s find panic:%v\n%s", r, string(debug.Stack()))
+			}
+		}()
+		run()
+	}(runnable)
 }
 
 func getLocalHost() string {

@@ -52,6 +52,10 @@ func (b *ReporterBuilder) Build() *Reporter {
 	}
 }
 
+func (r *Reporter) stop() {
+	r.manager.Stop()
+}
+
 /**
  * Counter介绍：https://site.bytedance.net/docs/2080/2717/36906/
  * tags：tag列表，格式"key:Value"，通过“:”分割key和value
@@ -75,7 +79,6 @@ func (r *Reporter) Timer(key string, value float64, tagKvs ...string) {
 	if !r.param.enableMetrics {
 		return
 	}
-	//metric.emitTimer(key, cost, MetricsHelper.appendTags(BASE_TAGS, TagKvs)); //todo:补充baseTags
 	r.manager.emitTimer(key, appendTags(r.param.baseTags, tagKvs), value)
 }
 
@@ -89,7 +92,6 @@ func (r *Reporter) Latency(key string, begin time.Time, tagKvs ...string) {
 	if !r.param.enableMetrics {
 		return
 	}
-	//metric.emitTimer(key, cost, MetricsHelper.appendTags(BASE_TAGS, TagKvs)); //todo:补充baseTags
 	r.manager.emitTimer(key, appendTags(r.param.baseTags, tagKvs), float64(time.Now().Sub(begin).Milliseconds()))
 }
 

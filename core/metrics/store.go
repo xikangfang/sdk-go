@@ -21,7 +21,7 @@ func NewStore(name string) *Store {
 func NewStoreWithFlushTime(name string, flushInterval time.Duration) *Store {
 	c := &Store{
 		name:       name,
-		expireTime: time.Now().Add(defaultExpireTime),
+		expireTime: time.Now().Add(defaultMetricsExpireTime),
 		queue:      make(chan *Item, maxQueueSize),
 		valueMap:   make(map[Item]*MetricsRequest),
 		httpCli:    GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
@@ -85,8 +85,6 @@ func (c *Store) flush() {
 				logs.Info("remove counter key: %+v", item)
 			}
 		}
-		if success := c.httpCli.emit(metricsRequests); !success {
-			logs.Error("exec store fail")
-		}
+		c.httpCli.put(metricsRequests)
 	}
 }

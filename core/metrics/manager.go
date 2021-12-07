@@ -7,13 +7,6 @@ import (
 	"time"
 )
 
-const (
-	//default expire interval of each counter/timer/store, expired metrics will be cleaned
-	defaultTTL = 100 * time.Second
-	//interval of flushing all cache metrics
-	defaultFlushInterval = 15 * time.Second
-)
-
 var managerCache = &InstanceCache{
 	instanceMap:     make(map[string]interface{}),
 	instanceBuilder: newManager,
@@ -22,10 +15,10 @@ var managerCache = &InstanceCache{
 
 type Manager struct {
 	prefix        string
-	ttl           time.Duration
+	tidyInterval  time.Duration
 	locks         map[metricsType]*sync.RWMutex
 	flushInterval time.Duration
-	metricsMaps   map[metricsType]map[string]ExpirableMetrics
+	metricsMaps   map[metricsType]map[string]Metrics
 	stopped       int32
 }
 
@@ -35,24 +28,24 @@ func GetManager(prefix string) *Manager {
 }
 
 func newManager(prefix string) interface{} {
-	return newManagerWithParams(prefix, defaultTTL, defaultFlushInterval)
+	return newManagerWithParams(prefix, defaultTidyInterval, defaultFlushInterval)
 }
 
-//ttl should be longer than flushInterval
+//tidyInterval should be longer than flushInterval
 func newManagerWithParams(prefix string, ttl time.Duration, flushInterval time.Duration) *Manager {
 	manager := &Manager{
-		prefix: prefix,
-		ttl:    ttl,
+		prefix:       prefix,
+		tidyInterval: ttl,
 		locks: map[metricsType]*sync.RWMutex{
 			metricsTypeStore:   &sync.RWMutex{},
 			metricsTypeCounter: &sync.RWMutex{},
 			metricsTypeTimer:   &sync.RWMutex{},
 		},
 		flushInterval: flushInterval,
-		metricsMaps: map[metricsType]map[string]ExpirableMetrics{
-			metricsTypeStore:   make(map[string]ExpirableMetrics, 256),
-			metricsTypeCounter: make(map[string]ExpirableMetrics, 256),
-			metricsTypeTimer:   make(map[string]ExpirableMetrics, 256),
+		metricsMaps: map[metricsType]map[string]Metrics{
+			metricsTypeStore:   make(map[string]Metrics, 256),
+			metricsTypeCounter: make(map[string]Metrics, 256),
+			metricsTypeTimer:   make(map[string]Metrics, 256),
 		},
 		stopped: 0,
 	}
@@ -60,115 +53,116 @@ func newManagerWithParams(prefix string, ttl time.Duration, flushInterval time.D
 	return manager
 }
 
-func (c *Manager) start() {
-	atomic.StoreInt32(&c.stopped, 0)
+func (m *Manager) start() {
+	atomic.StoreInt32(&m.stopped, 0)
 	// Regularly report metrics, one thread for each type
-	for metricsType := range c.metricsMaps {
+	for metricsType := range m.metricsMaps {
 		metricsType := metricsType
 		go func() {
-			ticker := time.NewTicker(c.flushInterval)
+			ticker := time.NewTicker(m.flushInterval)
 			for {
-				if c.isStopped() {
+				if m.isStopped() {
 					return
 				}
 				<-ticker.C
-				c.reportMetrics(metricsType)
+				m.reportMetrics(metricsType)
 			}
 		}()
 	}
 	// Regularly clean up overdue metrics
 	go func() {
-		ticker := time.NewTicker(c.ttl)
+		ticker := time.NewTicker(m.tidyInterval)
 		for {
-			if c.isStopped() {
+			if m.isStopped() {
 				return
 			}
 			<-ticker.C
-			c.tidy()
+			m.tidy()
 		}
 	}()
 }
 
-func (c *Manager) isStopped() bool {
-	return atomic.LoadInt32(&c.stopped) == 1
+func (m *Manager) isStopped() bool {
+	return atomic.LoadInt32(&m.stopped) == 1
 }
 
-func (c *Manager) Stop() {
-	atomic.StoreInt32(&c.stopped, 1)
+func (m *Manager) Stop() {
+	m.tidy()
+	atomic.StoreInt32(&m.stopped, 1)
 }
 
-func (c *Manager) reportMetrics(metricsType metricsType) {
-	c.locks[metricsType].RLock()
-	defer c.locks[metricsType].RUnlock()
-	for _, metrics := range c.metricsMaps[metricsType] { //read map
+func (m *Manager) reportMetrics(metricsType metricsType) {
+	m.locks[metricsType].RLock()
+	defer m.locks[metricsType].RUnlock()
+	for _, metrics := range m.metricsMaps[metricsType] { //read map
 		// report stores
 		metrics.flush()
 	}
 }
 
-func (c *Manager) tidy() {
+func (m *Manager) tidy() {
 	// clean expired metrics
-	for metricsType, metricsMap := range c.metricsMaps {
-		expiredMetrics := make([]ExpirableMetrics, 0)
+	for metricsType, metricsMap := range m.metricsMaps {
+		expiredMetrics := make([]Metrics, 0)
 		for _, metrics := range metricsMap {
 			if metrics.isExpired() {
 				expiredMetrics = append(expiredMetrics, metrics)
 			}
 		}
 		if len(expiredMetrics) != 0 {
-			c.locks[metricsType].Lock()
+			m.locks[metricsType].Lock()
 			for _, metrics := range expiredMetrics {
 				delete(metricsMap, metrics.getName())
 				if IsEnablePrintLog() {
 					logs.Info("remove expired metrics %+v", metrics.getName())
 				}
 			}
-			c.locks[metricsType].Unlock()
+			m.locks[metricsType].Unlock()
 		}
 	}
 }
 
-func (c *Manager) emitCounter(name string, tags map[string]string, value float64) {
-	c.getOrAddMetrics(metricsTypeCounter, c.prefix+"."+name, nil).emit(value, tags)
+func (m *Manager) emitCounter(name string, tags map[string]string, value float64) {
+	m.getOrAddMetrics(metricsTypeCounter, m.prefix+"."+name, nil).emit(value, tags)
 }
 
-func (c *Manager) emitTimer(name string, tags map[string]string, value float64) {
-	c.getOrAddMetrics(metricsTypeTimer, c.prefix+"."+name, tags).emit(value, nil)
+func (m *Manager) emitTimer(name string, tags map[string]string, value float64) {
+	m.getOrAddMetrics(metricsTypeTimer, m.prefix+"."+name, tags).emit(value, nil)
 }
 
-func (c *Manager) emitStore(name string, tags map[string]string, value float64) {
-	c.getOrAddMetrics(metricsTypeStore, c.prefix+"."+name, nil).emit(value, tags)
+func (m *Manager) emitStore(name string, tags map[string]string, value float64) {
+	m.getOrAddMetrics(metricsTypeStore, m.prefix+"."+name, nil).emit(value, tags)
 }
 
-func (c *Manager) getOrAddMetrics(metricsType metricsType, name string, tagKvs map[string]string) ExpirableMetrics {
+func (m *Manager) getOrAddMetrics(metricsType metricsType, name string, tagKvs map[string]string) Metrics {
 	tagString := ""
 	if len(tagKvs) != 0 {
 		tagString = processTags(tagKvs)
 	}
 	metricsKey := name + tagString
-	metrics, exist := c.metricsMaps[metricsType][metricsKey]
+	metrics, exist := m.metricsMaps[metricsType][metricsKey]
 	if !exist {
-		c.locks[metricsType].Lock()
-		defer c.locks[metricsType].Unlock()
-		metrics, exist := c.metricsMaps[metricsType][metricsKey]
+		m.locks[metricsType].Lock()
+		defer m.locks[metricsType].Unlock()
+		metrics, exist := m.metricsMaps[metricsType][metricsKey]
 		if !exist {
-			metrics = c.buildMetrics(metricsType, name, tagString)
-			metrics.updateExpireTime(c.ttl)
-			c.metricsMaps[metricsType][metricsKey] = metrics
+			metrics = m.buildMetrics(metricsType, name, tagString)
+			metrics.updateExpireTime(m.tidyInterval)
+			m.metricsMaps[metricsType][metricsKey] = metrics
 			return metrics
 		}
 	}
 	return metrics
 }
 
-func (c *Manager) buildMetrics(metricsType metricsType, name string, tagString string) ExpirableMetrics {
+func (m *Manager) buildMetrics(metricsType metricsType, name string, tagString string) Metrics {
 	switch metricsType {
 	case metricsTypeStore:
-		return NewStoreWithFlushTime(name, c.flushInterval)
+		return NewStoreWithFlushTime(name, m.flushInterval)
 	case metricsTypeCounter:
-		return NewCounterWithFlushTime(name, c.flushInterval)
+		return NewCounterWithFlushTime(name, m.flushInterval)
 	case metricsTypeTimer:
-		return NewTimerWithFlushTime(name, tagString, c.flushInterval)
+		return NewTimerWithFlushTime(name, tagString, m.flushInterval)
 	}
 	return nil
 }

@@ -26,7 +26,7 @@ func NewTimerWithFlushTime(name string, tags string, flushInterval time.Duration
 	c := &Timer{
 		name:       name,
 		tagKvs:     recoverTags(tags),
-		expireTime: time.Now().Add(defaultExpireTime),
+		expireTime: time.Now().Add(defaultMetricsExpireTime),
 		queue:      make(chan float64, maxQueueSize),
 		reservoir:  gm.NewUniformSample(reservoirSize),
 		httpCli:    GetClient(fmt.Sprintf(otherUrlFormat, metricsDomain)),
@@ -71,9 +71,7 @@ func (c *Timer) flush() {
 	}
 	snapshot := c.reservoir.Snapshot()
 	metricsRequests := c.buildMetricRequests(snapshot, size)
-	if success := c.httpCli.emit(metricsRequests); !success {
-		logs.Error("exec timer fail")
-	}
+	c.httpCli.put(metricsRequests)
 }
 
 func (c *Timer) buildMetricRequests(snapshot gm.Sample, size int64) []*MetricsRequest {

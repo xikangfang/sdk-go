@@ -29,10 +29,6 @@ func NewItemWithExpire(tags string, value float64, expireDuration time.Duration)
 	}
 }
 
-func (i *Item) isExpired() bool {
-	return time.Now().After(i.expireTime)
-}
-
 func (i *Item) toString() string {
 	return fmt.Sprintf("Item{\"tags\":%s,\"Value\":%v}", i.tags, i.value)
 }

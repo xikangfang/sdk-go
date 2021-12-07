@@ -10,6 +10,7 @@ import (
 
 const (
 	maxTryTimes        = 2
+	maxRequestsSize    = 5000 //todo:确认需要多大
 	defaultHttpTimeout = 800 * time.Millisecond
 )
 
@@ -30,8 +31,10 @@ type MetricsRequest struct {
 }
 
 type Client struct {
-	url     string
-	timeout time.Duration
+	url      string
+	timeout  time.Duration
+	requests chan []*MetricsRequest
+	stopped  chan struct{}
 }
 
 func GetClient(url string) *Client {
@@ -39,9 +42,43 @@ func GetClient(url string) *Client {
 }
 
 func newClient(url string) interface{} {
-	return &Client{
-		url:     url,
-		timeout: defaultHttpTimeout,
+	cli := &Client{
+		url:      url,
+		timeout:  defaultHttpTimeout,
+		requests: make(chan []*MetricsRequest, maxRequestsSize),
+		stopped:  make(chan struct{}),
+	}
+	cli.start()
+	return cli
+}
+
+func (h *Client) start() {
+	AsyncExecute(func() {
+		for {
+			select {
+			case metricsRequests := <-h.requests:
+				if success := h.send(metricsRequests); !success {
+					logs.Error("exec metrics fail, url:%s", h.url)
+				}
+			case <-h.stopped:
+				return
+			}
+		}
+	})
+}
+
+// todo:如何关闭单例中的任务，可以采用定期回收的方式
+func (h *Client) stop() {
+	h.stopped <- struct{}{}
+}
+
+func (h *Client) put(metricRequests []*MetricsRequest) {
+	select {
+	case h.requests <- metricRequests:
+	default:
+		if IsEnablePrintLog() {
+			logs.Warn("metrics requests emit too fast, exceed max queue size(%d)", maxRequestsSize)
+		}
 	}
 }
 
